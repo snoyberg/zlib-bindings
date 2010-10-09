@@ -3,6 +3,7 @@
 module Codec.Zlib
     ( -- * Data types
       ZStream
+    , WindowBits (..)
       -- * Inflate
     , initInflate
     , withInflateInput
