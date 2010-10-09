@@ -8,6 +8,10 @@ module Codec.Zlib
     , initInflate
     , withInflateInput
     , finishInflate
+      -- * Deflate
+    , initDeflate
+    , withDeflateInput
+    , finishDeflate
     ) where
 
 import Foreign.C
@@ -43,6 +47,24 @@ initInflate w = do
         c_set_avail_out zstr buff $ fromIntegral defaultChunkSize
     return (fzstr, fbuff)
 
+foreign import ccall unsafe "create_z_stream_deflate"
+    c_create_z_stream_deflate :: CInt -> IO ZStream'
+
+foreign import ccall unsafe "&free_z_stream_deflate"
+    c_free_z_stream_deflate :: FunPtr (ZStream' -> IO ())
+
+initDeflate :: WindowBits -> IO ZStream
+initDeflate w = do
+    let w' = case w of
+                DefaultWindowBits -> 15
+                WindowBits i -> fromIntegral i
+    zstr <- c_create_z_stream_deflate w'
+    fzstr <- newForeignPtr c_free_z_stream_deflate zstr
+    fbuff <- mallocForeignPtrBytes defaultChunkSize
+    withForeignPtr fbuff $ \buff ->
+        c_set_avail_out zstr buff $ fromIntegral defaultChunkSize
+    return (fzstr, fbuff)
+
 foreign import ccall unsafe "set_avail_in"
     c_set_avail_in :: ZStream' -> Ptr CChar -> CUInt -> IO ()
 
@@ -65,25 +87,26 @@ withInflateInput (fzstr, fbuff) bs f =
     withForeignPtr fzstr $ \zstr ->
         unsafeUseAsCStringLen bs $ \(cstr, len) -> do
             c_set_avail_in zstr cstr $ fromIntegral len
-            f $ drain zstr
-  where
-    drain zstr = do
-        a <- c_get_avail_in zstr
-        if a == 0
-            then return Nothing
-            else withForeignPtr fbuff $ \buff -> do
-                res <- c_call_inflate_noflush zstr
-                when (res < 0 && res /= (-5)) $ error -- FIXME
-                    $ "zlib: Error in underlying stream: " ++ show res
-                avail <- c_get_avail_out zstr
-                if avail == 0
-                    then do
-                        let size = defaultChunkSize - fromIntegral avail
-                        bs <- S.packCStringLen (buff, size)
-                        c_set_avail_out zstr buff
-                            $ fromIntegral defaultChunkSize
-                        return $ Just bs
-                    else return Nothing
+            f $ drain fbuff zstr c_call_inflate_noflush False
+
+drain fbuff zstr func isFinish = do
+    a <- c_get_avail_in zstr
+    if a == 0
+        then return Nothing
+        else withForeignPtr fbuff $ \buff -> do
+            res <- func zstr
+            when (res < 0 && res /= (-5)) $ error -- FIXME
+                $ "zlib: Error in underlying stream: " ++ show res
+            avail <- c_get_avail_out zstr
+            let size = defaultChunkSize - fromIntegral avail
+            let toOutput = avail == 0 || (isFinish && size /= 0)
+            if toOutput
+                then do
+                    bs <- S.packCStringLen (buff, size)
+                    c_set_avail_out zstr buff
+                        $ fromIntegral defaultChunkSize
+                    return $ Just bs
+                else return Nothing
 
 finishInflate :: ZStream -> IO S.ByteString
 finishInflate (fzstr, fbuff) =
@@ -92,3 +115,22 @@ finishInflate (fzstr, fbuff) =
             avail <- c_get_avail_out zstr
             let size = defaultChunkSize - fromIntegral avail
             S.packCStringLen (buff, size)
+
+foreign import ccall unsafe "call_deflate_noflush"
+    c_call_deflate_noflush :: ZStream' -> IO CInt
+
+withDeflateInput
+    :: ZStream -> S.ByteString -> (IO (Maybe S.ByteString) -> IO a) -> IO a
+withDeflateInput (fzstr, fbuff) bs f =
+    withForeignPtr fzstr $ \zstr ->
+        unsafeUseAsCStringLen bs $ \(cstr, len) -> do
+            c_set_avail_in zstr cstr $ fromIntegral len
+            f $ drain fbuff zstr c_call_deflate_noflush False
+
+foreign import ccall unsafe "call_deflate_finish"
+    c_call_deflate_finish :: ZStream' -> IO CInt
+
+finishDeflate :: ZStream -> (IO (Maybe S.ByteString) -> IO a) -> IO a
+finishDeflate (fzstr, fbuff) f =
+    withForeignPtr fzstr $ \zstr ->
+        f $ drain fbuff zstr c_call_deflate_finish True

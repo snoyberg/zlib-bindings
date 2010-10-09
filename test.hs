@@ -45,7 +45,7 @@ instance Arbitrary L.ByteString where
 instance Arbitrary S.ByteString where
     arbitrary = S.pack `fmap` arbitrary
 
-prop_lbs_zlib lbs = unsafePerformIO $ do
+prop_lbs_zlib_inflate lbs = unsafePerformIO $ do
     let glbs = compress lbs
     inf <- initInflate defaultWindowBits
     inflated <- foldM (go' inf) id $ L.toChunks glbs
@@ -53,6 +53,19 @@ prop_lbs_zlib lbs = unsafePerformIO $ do
     return $ lbs == L.fromChunks (inflated [final])
   where
     go' inf front bs = withInflateInput inf bs $ go front
+    go front x = do
+        y <- x
+        case y of
+            Nothing -> return front
+            Just z -> go (front . (:) z) x
+
+prop_lbs_zlib_deflate lbs = unsafePerformIO $ do
+    def <- initDeflate defaultWindowBits
+    deflated <- foldM (go' def) id $ L.toChunks lbs
+    deflated' <- finishDeflate def $ go deflated
+    return $ lbs == decompress (L.fromChunks (deflated' []))
+  where
+    go' inf front bs = withDeflateInput inf bs $ go front
     go front x = do
         y <- x
         case y of
