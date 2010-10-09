@@ -14,13 +14,14 @@ test_license_single = do
     gziped <- S.readFile "LICENSE.gz"
     inf <- initInflate $ WindowBits 31
     ungziped <- withInflateInput inf gziped $ go id
+    final <- finishInflate inf
     raw <- S.readFile "LICENSE"
-    assertEqual raw ungziped
+    assertEqual raw $ S.concat $ ungziped [final]
   where
     go front x = do
         y <- x
         case y of
-            Nothing -> return $ S.concat $ front []
+            Nothing -> return front
             Just z -> go (front . (:) z) x
 
 test_license_multi = do
@@ -29,7 +30,8 @@ test_license_multi = do
     inf <- initInflate $ WindowBits 31
     ungziped' <- foldM (go' inf) id gziped'
     raw <- S.readFile "LICENSE"
-    assertEqual raw $ S.concat $ ungziped' []
+    final <- finishInflate inf
+    assertEqual raw $ S.concat $ ungziped' [final]
   where
     go' inf front bs = withInflateInput inf bs $ go front
     go front x = do
@@ -47,7 +49,8 @@ prop_lbs_zlib lbs = unsafePerformIO $ do
     let glbs = compress lbs
     inf <- initInflate defaultWindowBits
     inflated <- foldM (go' inf) id $ L.toChunks glbs
-    return $ lbs == L.fromChunks (inflated [])
+    final <- finishInflate inf
+    return $ lbs == L.fromChunks (inflated [final])
   where
     go' inf front bs = withInflateInput inf bs $ go front
     go front x = do

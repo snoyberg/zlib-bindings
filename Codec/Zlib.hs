@@ -7,6 +7,7 @@ module Codec.Zlib
       -- * Inflate
     , initInflate
     , withInflateInput
+    , finishInflate
     ) where
 
 import Foreign.C
@@ -22,7 +23,7 @@ import Control.Monad (when)
 
 data ZStreamStruct
 type ZStream' = Ptr ZStreamStruct
-type ZStream = ForeignPtr ZStreamStruct
+type ZStream = (ForeignPtr ZStreamStruct, ForeignPtr CChar)
 
 foreign import ccall unsafe "create_z_stream_inflate"
     c_create_z_stream_inflate :: CInt -> IO ZStream'
@@ -36,7 +37,11 @@ initInflate w = do
                 DefaultWindowBits -> 15
                 WindowBits i -> fromIntegral i
     zstr <- c_create_z_stream_inflate w'
-    newForeignPtr c_free_z_stream_inflate zstr
+    fzstr <- newForeignPtr c_free_z_stream_inflate zstr
+    fbuff <- mallocForeignPtrBytes defaultChunkSize
+    withForeignPtr fbuff $ \buff ->
+        c_set_avail_out zstr buff $ fromIntegral defaultChunkSize
+    return (fzstr, fbuff)
 
 foreign import ccall unsafe "set_avail_in"
     c_set_avail_in :: ZStream' -> Ptr CChar -> CUInt -> IO ()
@@ -56,7 +61,7 @@ foreign import ccall unsafe "call_inflate_noflush"
 withInflateInput
     :: ZStream -> S.ByteString -> (IO (Maybe S.ByteString) -> IO a)
     -> IO a
-withInflateInput fzstr bs f =
+withInflateInput (fzstr, fbuff) bs f =
     withForeignPtr fzstr $ \zstr ->
         unsafeUseAsCStringLen bs $ \(cstr, len) -> do
             c_set_avail_in zstr cstr $ fromIntegral len
@@ -66,15 +71,24 @@ withInflateInput fzstr bs f =
         a <- c_get_avail_in zstr
         if a == 0
             then return Nothing
-            else allocaBytes defaultChunkSize $ \buff -> do
-                c_set_avail_out zstr buff $ fromIntegral defaultChunkSize
+            else withForeignPtr fbuff $ \buff -> do
                 res <- c_call_inflate_noflush zstr
                 when (res < 0 && res /= (-5)) $ error -- FIXME
                     $ "zlib: Error in underlying stream: " ++ show res
                 avail <- c_get_avail_out zstr
-                let size = defaultChunkSize - fromIntegral avail
-                if size == 0
-                    then return Nothing
-                    else do
+                if avail == 0
+                    then do
+                        let size = defaultChunkSize - fromIntegral avail
                         bs <- S.packCStringLen (buff, size)
+                        c_set_avail_out zstr buff
+                            $ fromIntegral defaultChunkSize
                         return $ Just bs
+                    else return Nothing
+
+finishInflate :: ZStream -> IO S.ByteString
+finishInflate (fzstr, fbuff) =
+    withForeignPtr fzstr $ \zstr ->
+        withForeignPtr fbuff $ \buff -> do
+            avail <- c_get_avail_out zstr
+            let size = defaultChunkSize - fromIntegral avail
+            S.packCStringLen (buff, size)
