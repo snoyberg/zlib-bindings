@@ -7,16 +7,18 @@ import Codec.Zlib
 import Codec.Compression.Zlib
 import qualified Codec.Compression.GZip as Gzip
 import qualified Data.ByteString as S
+import qualified Data.ByteString.Char8 as S8
 import qualified Data.ByteString.Lazy as L
 import Control.Monad (foldM)
 import System.IO.Unsafe (unsafePerformIO)
 
+license = S8.filter (/= '\r') $ unsafePerformIO $ S.readFile "LICENSE"
+
 test_license_single_deflate = do
-    raw <- S.readFile "LICENSE"
     def <- initDeflate $ WindowBits 31
-    gziped <- withDeflateInput def raw $ go id
+    gziped <- withDeflateInput def license $ go id
     gziped' <- finishDeflate def $ go gziped
-    let raw' = L.fromChunks [raw]
+    let raw' = L.fromChunks [license]
     assertEqual raw' $ Gzip.decompress $ L.fromChunks $ gziped' []
   where
     go front x = do
@@ -30,8 +32,7 @@ test_license_single_inflate = do
     inf <- initInflate $ WindowBits 31
     ungziped <- withInflateInput inf gziped $ go id
     final <- finishInflate inf
-    raw <- S.readFile "LICENSE"
-    assertEqual raw $ S.concat $ ungziped [final]
+    assertEqual license $ S.concat $ ungziped [final]
   where
     go front x = do
         y <- x
@@ -40,11 +41,10 @@ test_license_single_inflate = do
             Just z -> go (front . (:) z) x
 
 test_license_multi_deflate = do
-    raw <- S.readFile "LICENSE"
     def <- initDeflate $ WindowBits 31
-    gziped <- foldM (go' def) id $ map S.singleton $ S.unpack raw
+    gziped <- foldM (go' def) id $ map S.singleton $ S.unpack license
     gziped' <- finishDeflate def $ go gziped
-    let raw' = L.fromChunks [raw]
+    let raw' = L.fromChunks [license]
     assertEqual raw' $ Gzip.decompress $ L.fromChunks $ gziped' []
   where
     go' inf front bs = withDeflateInput inf bs $ go front
@@ -59,9 +59,8 @@ test_license_multi_inflate = do
     let gziped' = map S.singleton $ S.unpack gziped
     inf <- initInflate $ WindowBits 31
     ungziped' <- foldM (go' inf) id gziped'
-    raw <- S.readFile "LICENSE"
     final <- finishInflate inf
-    assertEqual raw $ S.concat $ ungziped' [final]
+    assertEqual license $ S.concat $ ungziped' [final]
   where
     go' inf front bs = withInflateInput inf bs $ go front
     go front x = do
