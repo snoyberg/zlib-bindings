@@ -1,10 +1,12 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE EmptyDataDecls #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 module Codec.Zlib
     ( -- * Data types
       Inflate
     , Deflate
     , WindowBits (..)
+    , ZlibException (..)
       -- * Inflate
     , initInflate
     , withInflateInput
@@ -18,19 +20,23 @@ module Codec.Zlib
 import Foreign.C
 import Foreign.Ptr
 import Foreign.ForeignPtr
-import Foreign.Marshal.Alloc (allocaBytes)
 import Data.ByteString.Unsafe
 import Codec.Compression.Zlib (WindowBits (..))
 import qualified Data.ByteString as S
-import Data.ByteString.Unsafe
 import Data.ByteString.Lazy.Internal (defaultChunkSize)
 import Control.Monad (when)
+import Data.Typeable (Typeable)
+import Control.Exception (Exception, throwIO)
 
 data ZStreamStruct
 type ZStream' = Ptr ZStreamStruct
 type ZStreamPair = (ForeignPtr ZStreamStruct, ForeignPtr CChar)
 newtype Inflate = Inflate ZStreamPair
 newtype Deflate = Deflate ZStreamPair
+
+data ZlibException = ZlibException Int
+    deriving (Show, Typeable)
+instance Exception ZlibException
 
 foreign import ccall unsafe "create_z_stream_inflate"
     c_create_z_stream_inflate :: CInt -> IO ZStream'
@@ -92,14 +98,16 @@ withInflateInput (Inflate (fzstr, fbuff)) bs f =
             c_set_avail_in zstr cstr $ fromIntegral len
             f $ drain fbuff zstr c_call_inflate_noflush False
 
+drain :: ForeignPtr CChar -> ZStream' -> (ZStream' -> IO CInt) -> Bool
+      -> IO (Maybe S.ByteString)
 drain fbuff zstr func isFinish = do
     a <- c_get_avail_in zstr
     if a == 0 && not isFinish
         then return Nothing
         else withForeignPtr fbuff $ \buff -> do
             res <- func zstr
-            when (res < 0 && res /= (-5)) $ error -- FIXME
-                $ "zlib: Error in underlying stream: " ++ show res
+            when (res < 0 && res /= (-5))
+                $ throwIO $ ZlibException $ fromIntegral res
             avail <- c_get_avail_out zstr
             let size = defaultChunkSize - fromIntegral avail
             let toOutput = avail == 0 || (isFinish && size /= 0)

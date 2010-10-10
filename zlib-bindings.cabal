@@ -41,6 +41,7 @@ executable zlib-bindings-test
                      , QuickCheck            >= 2.1.2
     else
         Buildable: False
+    ghc-options:     -Wall
     c-sources:       c/helper.c
     if os(windows)
         include-dirs:  cbits
