@@ -18,7 +18,7 @@ license = S8.filter (/= '\r') $ unsafePerformIO $ S.readFile "LICENSE"
 
 test_license_single_deflate :: Assertion
 test_license_single_deflate = do
-    def <- initDeflate $ WindowBits 31
+    def <- initDeflate 8 $ WindowBits 31
     gziped <- withDeflateInput def license $ go id
     gziped' <- finishDeflate def $ go gziped
     let raw' = L.fromChunks [license]
@@ -46,7 +46,7 @@ test_license_single_inflate = do
 
 test_license_multi_deflate :: Assertion
 test_license_multi_deflate = do
-    def <- initDeflate $ WindowBits 31
+    def <- initDeflate 5 $ WindowBits 31
     gziped <- foldM (go' def) id $ map S.singleton $ S.unpack license
     gziped' <- finishDeflate def $ go gziped
     let raw' = L.fromChunks [license]
@@ -97,7 +97,7 @@ prop_lbs_zlib_inflate lbs = unsafePerformIO $ do
 
 prop_lbs_zlib_deflate :: L.ByteString -> Bool
 prop_lbs_zlib_deflate lbs = unsafePerformIO $ do
-    def <- initDeflate defaultWindowBits
+    def <- initDeflate 7 defaultWindowBits
     deflated <- foldM (go' def) id $ L.toChunks lbs
     deflated' <- finishDeflate def $ go deflated
     return $ lbs == decompress (L.fromChunks (deflated' []))
