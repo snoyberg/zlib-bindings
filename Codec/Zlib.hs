@@ -5,7 +5,8 @@ module Codec.Zlib
     ( -- * Data types
       Inflate
     , Deflate
-    , WindowBits (..)
+    , WindowBits (WindowBits)
+    , defaultWindowBits
     , ZlibException (..)
       -- * Inflate
     , initInflate
@@ -21,7 +22,7 @@ import Foreign.C
 import Foreign.Ptr
 import Foreign.ForeignPtr
 import Data.ByteString.Unsafe
-import Codec.Compression.Zlib (WindowBits (..))
+import Codec.Compression.Zlib (WindowBits (WindowBits), defaultWindowBits)
 import qualified Data.ByteString as S
 import Data.ByteString.Lazy.Internal (defaultChunkSize)
 import Control.Monad (when)
@@ -44,12 +45,13 @@ foreign import ccall unsafe "create_z_stream_inflate"
 foreign import ccall unsafe "&free_z_stream_inflate"
     c_free_z_stream_inflate :: FunPtr (ZStream' -> IO ())
 
+wbToInt :: WindowBits -> CInt
+wbToInt (WindowBits i) = fromIntegral i
+wbToInt _ = 15
+
 initInflate :: WindowBits -> IO Inflate
 initInflate w = do
-    let w' = case w of
-                DefaultWindowBits -> 15
-                WindowBits i -> fromIntegral i
-    zstr <- c_create_z_stream_inflate w'
+    zstr <- c_create_z_stream_inflate $ wbToInt w
     fzstr <- newForeignPtr c_free_z_stream_inflate zstr
     fbuff <- mallocForeignPtrBytes defaultChunkSize
     withForeignPtr fbuff $ \buff ->
@@ -64,10 +66,7 @@ foreign import ccall unsafe "&free_z_stream_deflate"
 
 initDeflate :: WindowBits -> IO Deflate
 initDeflate w = do
-    let w' = case w of
-                DefaultWindowBits -> 15
-                WindowBits i -> fromIntegral i
-    zstr <- c_create_z_stream_deflate w'
+    zstr <- c_create_z_stream_deflate $ wbToInt w
     fzstr <- newForeignPtr c_free_z_stream_deflate zstr
     fbuff <- mallocForeignPtrBytes defaultChunkSize
     withForeignPtr fbuff $ \buff ->

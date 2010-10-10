@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -F -pgmF htfpp #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 import System.Environment ( getArgs )
 import Test.Framework
@@ -12,8 +13,10 @@ import qualified Data.ByteString.Lazy as L
 import Control.Monad (foldM)
 import System.IO.Unsafe (unsafePerformIO)
 
+license :: S.ByteString
 license = S8.filter (/= '\r') $ unsafePerformIO $ S.readFile "LICENSE"
 
+test_license_single_deflate :: Assertion
 test_license_single_deflate = do
     def <- initDeflate $ WindowBits 31
     gziped <- withDeflateInput def license $ go id
@@ -27,6 +30,7 @@ test_license_single_deflate = do
             Nothing -> return front
             Just z -> go (front . (:) z) x
 
+test_license_single_inflate :: Assertion
 test_license_single_inflate = do
     gziped <- S.readFile "LICENSE.gz"
     inf <- initInflate $ WindowBits 31
@@ -40,6 +44,7 @@ test_license_single_inflate = do
             Nothing -> return front
             Just z -> go (front . (:) z) x
 
+test_license_multi_deflate :: Assertion
 test_license_multi_deflate = do
     def <- initDeflate $ WindowBits 31
     gziped <- foldM (go' def) id $ map S.singleton $ S.unpack license
@@ -54,6 +59,7 @@ test_license_multi_deflate = do
             Nothing -> return front
             Just z -> go (front . (:) z) x
 
+test_license_multi_inflate :: Assertion
 test_license_multi_inflate = do
     gziped <- S.readFile "LICENSE.gz"
     let gziped' = map S.singleton $ S.unpack gziped
@@ -74,6 +80,7 @@ instance Arbitrary L.ByteString where
 instance Arbitrary S.ByteString where
     arbitrary = S.pack `fmap` arbitrary
 
+prop_lbs_zlib_inflate :: L.ByteString -> Bool
 prop_lbs_zlib_inflate lbs = unsafePerformIO $ do
     let glbs = compress lbs
     inf <- initInflate defaultWindowBits
@@ -88,6 +95,7 @@ prop_lbs_zlib_inflate lbs = unsafePerformIO $ do
             Nothing -> return front
             Just z -> go (front . (:) z) x
 
+prop_lbs_zlib_deflate :: L.ByteString -> Bool
 prop_lbs_zlib_deflate lbs = unsafePerformIO $ do
     def <- initDeflate defaultWindowBits
     deflated <- foldM (go' def) id $ L.toChunks lbs
@@ -101,6 +109,7 @@ prop_lbs_zlib_deflate lbs = unsafePerformIO $ do
             Nothing -> return front
             Just z -> go (front . (:) z) x
 
+main :: IO ()
 main = do
     args <- getArgs
     runTestWithArgs args allHTFTests
