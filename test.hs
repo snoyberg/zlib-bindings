@@ -13,6 +13,40 @@ import qualified Data.ByteString.Lazy as L
 import Control.Monad (foldM)
 import System.IO.Unsafe (unsafePerformIO)
 
+decompress' :: L.ByteString -> L.ByteString
+decompress' gziped = unsafePerformIO $ do
+    inf <- initInflate defaultWindowBits
+    ungziped <- foldM (go' inf) id $ L.toChunks gziped
+    final <- finishInflate inf
+    return $ L.fromChunks $ ungziped [final]
+  where
+    go' inf front bs = withInflateInput inf bs $ go front
+    go front x = do
+        y <- x
+        case y of
+            Nothing -> return front
+            Just z -> go (front . (:) z) x
+
+prop_decompress' :: L.ByteString -> Bool
+prop_decompress' lbs = lbs == decompress' (compress lbs)
+
+compress' :: L.ByteString -> L.ByteString
+compress' raw = unsafePerformIO $ do
+    def <- initDeflate 7 defaultWindowBits
+    gziped <- foldM (go' def) id $ L.toChunks raw
+    gziped' <- finishDeflate def $ go gziped
+    return $ L.fromChunks $ gziped' []
+  where
+    go' def front bs = withDeflateInput def bs $ go front
+    go front x = do
+        y <- x
+        case y of
+            Nothing -> return front
+            Just z -> go (front . (:) z) x
+
+prop_compress' :: L.ByteString -> Bool
+prop_compress' lbs = lbs == decompress (compress' lbs)
+
 license :: S.ByteString
 license = S8.filter (/= '\r') $ unsafePerformIO $ S.readFile "LICENSE"
 
