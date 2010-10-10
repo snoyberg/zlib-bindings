@@ -49,7 +49,7 @@ unsigned int get_avail_out (z_stream *stream)
 	return stream->avail_out;
 }
 
-z_stream * create_z_stream_deflate (int window_bits)
+z_stream * create_z_stream_deflate (int level, int window_bits)
 {
 	z_stream *ret = malloc(sizeof(z_stream));
 	ret->zalloc = Z_NULL;
@@ -58,7 +58,12 @@ z_stream * create_z_stream_deflate (int window_bits)
 	ret->next_in = NULL;
 	ret->avail_in = 0;
 
-	if (deflateInit2(ret, 7, Z_DEFLATED, window_bits, 8, Z_DEFAULT_STRATEGY)
+	if (deflateInit2(ret,
+			 level,
+			 Z_DEFLATED,
+			 window_bits,
+			 8,
+			 Z_DEFAULT_STRATEGY)
 		!= Z_OK)                 return NULL;
 	else
 	    return ret;

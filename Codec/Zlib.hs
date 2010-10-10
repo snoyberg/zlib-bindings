@@ -59,14 +59,14 @@ initInflate w = do
     return $ Inflate (fzstr, fbuff)
 
 foreign import ccall unsafe "create_z_stream_deflate"
-    c_create_z_stream_deflate :: CInt -> IO ZStream'
+    c_create_z_stream_deflate :: CInt -> CInt -> IO ZStream'
 
 foreign import ccall unsafe "&free_z_stream_deflate"
     c_free_z_stream_deflate :: FunPtr (ZStream' -> IO ())
 
-initDeflate :: WindowBits -> IO Deflate
-initDeflate w = do
-    zstr <- c_create_z_stream_deflate $ wbToInt w
+initDeflate :: Int -> WindowBits -> IO Deflate
+initDeflate level w = do
+    zstr <- c_create_z_stream_deflate (fromIntegral level) $ wbToInt w
     fzstr <- newForeignPtr c_free_z_stream_deflate zstr
     fbuff <- mallocForeignPtrBytes defaultChunkSize
     withForeignPtr fbuff $ \buff ->
