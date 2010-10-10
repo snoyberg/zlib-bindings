@@ -9,6 +9,17 @@
 -- You'll probably need to reference the docs a bit to understand the
 -- WindowBits parameters below, but a basic rule of thumb is 15 is for zlib
 -- compression, and 31 for gzip compression.
+--
+-- A simple streaming compressor in pseudo-code would look like:
+--
+-- > def <- initDeflate ...
+-- > withDeflateInput def rawContent1 sendCompressedData
+-- > withDeflateInput def rawContent2 sendCompressedData
+-- > ...
+-- > finishDeflate def sendCompressedData
+--
+-- You can see a more complete example is available in the included
+-- file-test.hs.
 module Codec.Zlib
     ( -- * Inflate
       Inflate

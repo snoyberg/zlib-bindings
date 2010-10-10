@@ -47,6 +47,18 @@ executable zlib-bindings-test
         include-dirs:  cbits
         install-includes: zlib.h zconf.h
 
+executable zlib-bindings-file-test
+    main-is: file-test.hs
+    if flag(test)
+        Buildable: True
+    else
+        Buildable: False
+    ghc-options:     -Wall
+    c-sources:       c/helper.c
+    if os(windows)
+        include-dirs:  cbits
+        install-includes: zlib.h zconf.h
+
 source-repository head
   type:     git
   location: git://github.com/snoyberg/zlib-bindings.git
