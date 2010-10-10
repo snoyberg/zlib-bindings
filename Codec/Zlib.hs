@@ -91,7 +91,7 @@ withInflateInput (fzstr, fbuff) bs f =
 
 drain fbuff zstr func isFinish = do
     a <- c_get_avail_in zstr
-    if a == 0
+    if a == 0 && not isFinish
         then return Nothing
         else withForeignPtr fbuff $ \buff -> do
             res <- func zstr

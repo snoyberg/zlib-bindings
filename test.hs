@@ -5,12 +5,27 @@ import Test.Framework
 
 import Codec.Zlib
 import Codec.Compression.Zlib
+import qualified Codec.Compression.GZip as Gzip
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 import Control.Monad (foldM)
 import System.IO.Unsafe (unsafePerformIO)
 
-test_license_single = do
+test_license_single_deflate = do
+    raw <- S.readFile "LICENSE"
+    def <- initDeflate $ WindowBits 31
+    gziped <- withDeflateInput def raw $ go id
+    gziped' <- finishDeflate def $ go gziped
+    let raw' = L.fromChunks [raw]
+    assertEqual raw' $ Gzip.decompress $ L.fromChunks $ gziped' []
+  where
+    go front x = do
+        y <- x
+        case y of
+            Nothing -> return front
+            Just z -> go (front . (:) z) x
+
+test_license_single_inflate = do
     gziped <- S.readFile "LICENSE.gz"
     inf <- initInflate $ WindowBits 31
     ungziped <- withInflateInput inf gziped $ go id
@@ -24,7 +39,22 @@ test_license_single = do
             Nothing -> return front
             Just z -> go (front . (:) z) x
 
-test_license_multi = do
+test_license_multi_deflate = do
+    raw <- S.readFile "LICENSE"
+    def <- initDeflate $ WindowBits 31
+    gziped <- foldM (go' def) id $ map S.singleton $ S.unpack raw
+    gziped' <- finishDeflate def $ go gziped
+    let raw' = L.fromChunks [raw]
+    assertEqual raw' $ Gzip.decompress $ L.fromChunks $ gziped' []
+  where
+    go' inf front bs = withDeflateInput inf bs $ go front
+    go front x = do
+        y <- x
+        case y of
+            Nothing -> return front
+            Just z -> go (front . (:) z) x
+
+test_license_multi_inflate = do
     gziped <- S.readFile "LICENSE.gz"
     let gziped' = map S.singleton $ S.unpack gziped
     inf <- initInflate $ WindowBits 31
