@@ -143,7 +143,6 @@ prop_lbs_zlib_deflate lbs = unsafePerformIO $ do
             Nothing -> return front
             Just z -> go (front . (:) z) x
 
-main :: IO ()
 main = do
     args <- getArgs
     runTestWithArgs args allHTFTests
