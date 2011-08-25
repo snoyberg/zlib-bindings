@@ -24,6 +24,7 @@ library
                  , bytestring            >= 0.9.1.4 && < 0.10
                  , zlib                  >= 0.5.2.0 && < 0.6
     exposed-modules: Codec.Zlib
+                     Codec.Zlib.Lowlevel
     ghc-options:     -Wall
     c-sources:       c/helper.c
     if os(windows)
