@@ -46,6 +46,8 @@ import Control.Monad (when)
 import Data.Typeable (Typeable)
 import Control.Exception (Exception, throwIO)
 
+type ZStreamPair = (ForeignPtr ZStreamStruct, ForeignPtr CChar)
+
 -- | The state of an inflation (eg, decompression) process. All allocated
 -- memory is automatically reclaimed by the garbage collector.
 newtype Inflate = Inflate ZStreamPair
@@ -79,16 +81,13 @@ data ZlibException = ZlibException Int
     deriving (Show, Typeable)
 instance Exception ZlibException
 
-wbToInt :: WindowBits -> CInt
-wbToInt (WindowBits i) = fromIntegral i
-wbToInt _ = 15
-
 -- | Initialize an inflation process with the given 'WindowBits'. You will need
 -- to call 'withInflateInput' to feed compressed data to this and
 -- 'finishInflate' to extract the final chunk of decompressed data.
 initInflate :: WindowBits -> IO Inflate
 initInflate w = do
-    zstr <- c_create_z_stream_inflate $ wbToInt w
+    zstr <- zstreamNew
+    inflateInit2 zstr w
     fzstr <- newForeignPtr c_free_z_stream_inflate zstr
     fbuff <- mallocForeignPtrBytes defaultChunkSize
     withForeignPtr fbuff $ \buff ->
@@ -102,7 +101,8 @@ initInflate w = do
 initDeflate :: Int -- ^ Compression level
             -> WindowBits -> IO Deflate
 initDeflate level w = do
-    zstr <- c_create_z_stream_deflate (fromIntegral level) $ wbToInt w
+    zstr <- zstreamNew
+    deflateInit2 zstr level w 8 StrategyDefault
     fzstr <- newForeignPtr c_free_z_stream_deflate zstr
     fbuff <- mallocForeignPtrBytes defaultChunkSize
     withForeignPtr fbuff $ \buff ->

@@ -16,6 +16,17 @@ z_stream * create_z_stream(void)
 	return ret;
 }
 
+int inflate_init2(z_stream *stream, int window_bits)
+{
+	return inflateInit2(stream, window_bits);
+}
+
+int deflate_init2(z_stream *stream, int level, int methodBits,
+                  int memlevel, int strategy)
+{
+	return deflateInit2(stream, level, Z_DEFLATED, methodBits, memlevel, strategy);
+}
+
 z_stream * create_z_stream_inflate (int window_bits)
 {
 	z_stream *ret = create_z_stream();

@@ -1,8 +1,12 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE EmptyDataDecls #-}
 module Codec.Zlib.Lowlevel
-    ( ZStreamPair
+    ( ZStreamStruct
     , ZStream'
+    , zstreamNew
+    , Strategy(..)
+    , deflateInit2
+    , inflateInit2
     , c_create_z_stream_inflate
     , c_free_z_stream_inflate
     , c_create_z_stream_deflate
@@ -18,13 +22,37 @@ module Codec.Zlib.Lowlevel
 
 import Foreign.C
 import Foreign.Ptr
-import Foreign.ForeignPtr
-
-import Data.ByteString.Unsafe
+import Codec.Compression.Zlib (WindowBits (WindowBits))
 
 data ZStreamStruct
 type ZStream' = Ptr ZStreamStruct
-type ZStreamPair = (ForeignPtr ZStreamStruct, ForeignPtr CChar)
+
+data Strategy =
+      StrategyDefault
+    | StrategyFiltered
+    | StrategyHuffman
+    | StrategyRLE
+    | StrategyFixed
+    deriving (Show,Eq,Ord,Enum)
+
+foreign import ccall unsafe "create_z_stream"
+    zstreamNew :: IO ZStream'
+
+foreign import ccall unsafe "deflate_init2"
+    c_deflateInit2 :: ZStream' -> CInt -> CInt -> CInt -> CInt
+                   -> IO ()
+
+deflateInit2 :: ZStream' -> Int -> WindowBits -> Int -> Strategy -> IO ()
+deflateInit2 zstream level windowBits memlevel strategy =
+    c_deflateInit2 zstream (fromIntegral level) (wbToInt windowBits)
+                   (fromIntegral memlevel)
+                   (fromIntegral $ fromEnum strategy)
+
+foreign import ccall unsafe "inflate_init2"
+    c_inflateInit2 :: ZStream' -> CInt -> IO ()
+
+inflateInit2 :: ZStream' -> WindowBits -> IO ()
+inflateInit2 zstream wb = c_inflateInit2 zstream (wbToInt wb)
 
 foreign import ccall unsafe "create_z_stream_inflate"
     c_create_z_stream_inflate :: CInt -> IO ZStream'
@@ -58,3 +86,8 @@ foreign import ccall unsafe "call_deflate_noflush"
 
 foreign import ccall unsafe "call_deflate_finish"
     c_call_deflate_finish :: ZStream' -> IO CInt
+
+wbToInt :: WindowBits -> CInt
+wbToInt (WindowBits i) = fromIntegral i
+wbToInt _ = 15
+
