@@ -1,14 +1,24 @@
 #include <zlib.h>
 #include <stdlib.h>
 
-z_stream * create_z_stream_inflate (int window_bits)
+z_stream * create_z_stream(void)
 {
 	z_stream *ret = malloc(sizeof(z_stream));
-	ret->zalloc = Z_NULL;
-	ret->zfree = Z_NULL;
-	ret->opaque = Z_NULL;
-	ret->next_in = NULL;
-	ret->avail_in = 0;
+	if (ret) {
+		ret->zalloc = Z_NULL;
+		ret->zfree = Z_NULL;
+		ret->opaque = Z_NULL;
+		ret->next_in = NULL;
+		ret->avail_in = 0;
+		ret->next_out = NULL;
+		ret->avail_out = 0;
+	}
+	return ret;
+}
+
+z_stream * create_z_stream_inflate (int window_bits)
+{
+	z_stream *ret = create_z_stream();
 
 	if (inflateInit2(ret, window_bits) != Z_OK)
 	    return NULL;
@@ -51,12 +61,7 @@ unsigned int get_avail_out (z_stream *stream)
 
 z_stream * create_z_stream_deflate (int level, int window_bits)
 {
-	z_stream *ret = malloc(sizeof(z_stream));
-	ret->zalloc = Z_NULL;
-	ret->zfree = Z_NULL;
-	ret->opaque = Z_NULL;
-	ret->next_in = NULL;
-	ret->avail_in = 0;
+	z_stream *ret = create_z_stream();
 
 	if (deflateInit2(ret,
 			 level,
