@@ -1,5 +1,3 @@
-{-# LANGUAGE ForeignFunctionInterface #-}
-{-# LANGUAGE EmptyDataDecls #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 -- | This is a middle-level wrapper around the zlib C API. It allows you to
 -- work fully with bytestrings and not touch the FFI at all, but is still
@@ -37,9 +35,9 @@ module Codec.Zlib
     , ZlibException (..)
     ) where
 
-import Foreign.C
-import Foreign.Ptr
+import Codec.Zlib.Lowlevel
 import Foreign.ForeignPtr
+import Foreign.C.Types
 import Data.ByteString.Unsafe
 import Codec.Compression.Zlib (WindowBits (WindowBits), defaultWindowBits)
 import qualified Data.ByteString as S
@@ -48,8 +46,6 @@ import Control.Monad (when)
 import Data.Typeable (Typeable)
 import Control.Exception (Exception, throwIO)
 
-data ZStreamStruct
-type ZStream' = Ptr ZStreamStruct
 type ZStreamPair = (ForeignPtr ZStreamStruct, ForeignPtr CChar)
 
 -- | The state of an inflation (eg, decompression) process. All allocated
@@ -85,33 +81,18 @@ data ZlibException = ZlibException Int
     deriving (Show, Typeable)
 instance Exception ZlibException
 
-foreign import ccall unsafe "create_z_stream_inflate"
-    c_create_z_stream_inflate :: CInt -> IO ZStream'
-
-foreign import ccall unsafe "&free_z_stream_inflate"
-    c_free_z_stream_inflate :: FunPtr (ZStream' -> IO ())
-
-wbToInt :: WindowBits -> CInt
-wbToInt (WindowBits i) = fromIntegral i
-wbToInt _ = 15
-
 -- | Initialize an inflation process with the given 'WindowBits'. You will need
 -- to call 'withInflateInput' to feed compressed data to this and
 -- 'finishInflate' to extract the final chunk of decompressed data.
 initInflate :: WindowBits -> IO Inflate
 initInflate w = do
-    zstr <- c_create_z_stream_inflate $ wbToInt w
+    zstr <- zstreamNew
+    inflateInit2 zstr w
     fzstr <- newForeignPtr c_free_z_stream_inflate zstr
     fbuff <- mallocForeignPtrBytes defaultChunkSize
     withForeignPtr fbuff $ \buff ->
         c_set_avail_out zstr buff $ fromIntegral defaultChunkSize
     return $ Inflate (fzstr, fbuff)
-
-foreign import ccall unsafe "create_z_stream_deflate"
-    c_create_z_stream_deflate :: CInt -> CInt -> IO ZStream'
-
-foreign import ccall unsafe "&free_z_stream_deflate"
-    c_free_z_stream_deflate :: FunPtr (ZStream' -> IO ())
 
 -- | Initialize a deflation process with the given compression level and
 -- 'WindowBits'. You will need to call 'withDeflateInput' to feed uncompressed
@@ -120,27 +101,13 @@ foreign import ccall unsafe "&free_z_stream_deflate"
 initDeflate :: Int -- ^ Compression level
             -> WindowBits -> IO Deflate
 initDeflate level w = do
-    zstr <- c_create_z_stream_deflate (fromIntegral level) $ wbToInt w
+    zstr <- zstreamNew
+    deflateInit2 zstr level w 8 StrategyDefault
     fzstr <- newForeignPtr c_free_z_stream_deflate zstr
     fbuff <- mallocForeignPtrBytes defaultChunkSize
     withForeignPtr fbuff $ \buff ->
         c_set_avail_out zstr buff $ fromIntegral defaultChunkSize
     return $ Deflate (fzstr, fbuff)
-
-foreign import ccall unsafe "set_avail_in"
-    c_set_avail_in :: ZStream' -> Ptr CChar -> CUInt -> IO ()
-
-foreign import ccall unsafe "set_avail_out"
-    c_set_avail_out :: ZStream' -> Ptr CChar -> CUInt -> IO ()
-
-foreign import ccall unsafe "get_avail_out"
-    c_get_avail_out :: ZStream' -> IO CUInt
-
-foreign import ccall unsafe "get_avail_in"
-    c_get_avail_in :: ZStream' -> IO CUInt
-
-foreign import ccall unsafe "call_inflate_noflush"
-    c_call_inflate_noflush :: ZStream' -> IO CInt
 
 -- | Feed the given 'S.ByteString' to the inflater. This function takes a
 -- function argument which takes a \"popper\". A popper is an IO action that
@@ -194,9 +161,6 @@ finishInflate (Inflate (fzstr, fbuff)) =
             let size = defaultChunkSize - fromIntegral avail
             S.packCStringLen (buff, size)
 
-foreign import ccall unsafe "call_deflate_noflush"
-    c_call_deflate_noflush :: ZStream' -> IO CInt
-
 -- | Feed the given 'S.ByteString' to the deflater. This function takes a
 -- function argument which takes a \"popper\". A popper is an IO action that
 -- will return the next bit of deflated data, returning 'Nothing' when there is
@@ -214,9 +178,6 @@ withDeflateInput (Deflate (fzstr, fbuff)) bs f =
         unsafeUseAsCStringLen bs $ \(cstr, len) -> do
             c_set_avail_in zstr cstr $ fromIntegral len
             f $ drain fbuff zstr c_call_deflate_noflush False
-
-foreign import ccall unsafe "call_deflate_finish"
-    c_call_deflate_finish :: ZStream' -> IO CInt
 
 -- | As explained in 'withDeflateInput', deflation buffers your compressed
 -- data. After you call 'withDeflateInput' with your last chunk of decompressed
