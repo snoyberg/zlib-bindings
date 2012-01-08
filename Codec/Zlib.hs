@@ -41,7 +41,7 @@ import Codec.Zlib.Lowlevel
 import Foreign.ForeignPtr
 import Foreign.C.Types
 import Data.ByteString.Unsafe
-import Codec.Compression.Zlib (WindowBits (WindowBits), defaultWindowBits)
+import Codec.Compression.Zlib (WindowBits(WindowBits), defaultWindowBits)
 import qualified Data.ByteString as S
 import Data.ByteString.Lazy.Internal (defaultChunkSize)
 import Control.Monad (when)
@@ -170,16 +170,26 @@ withInflateInput (Inflate ((fzstr, fbuff), inflateDictionary)) bs f =
     withForeignPtr fzstr $ \zstr ->
         unsafeUseAsCStringLen bs $ \(cstr, len) -> do
             c_set_avail_in zstr cstr $ fromIntegral len
-            f $ drain inflateDictionary fbuff zstr c_call_inflate_noflush False
+            f $ drain fbuff zstr inflate False
+  where
+    inflate zstr = do
+	res <- c_call_inflate_noflush zstr
+	if (res == zNeedDict)
+	    then maybe (throwIO $ ZlibException $ fromIntegral zNeedDict) -- no dictionary supplied so throw error
+		       (\dict -> (unsafeUseAsCStringLen dict $ \(cstr, len) -> do
+				    c_call_inflate_set_dictionary zstr cstr $ fromIntegral len
+				    c_call_inflate_noflush zstr))
+		       inflateDictionary
+	    else return res
 
-drain :: Maybe S.ByteString -> ForeignPtr CChar -> ZStream' -> (ZStream' -> IO CInt) -> Bool
+drain :: ForeignPtr CChar -> ZStream' -> (ZStream' -> IO CInt) -> Bool
       -> IO (Maybe S.ByteString)
-drain inflateDict fbuff zstr func isFinish = do
+drain fbuff zstr func isFinish = do
     a <- c_get_avail_in zstr
     if a == 0 && not isFinish
         then return Nothing
         else withForeignPtr fbuff $ \buff -> do
-            res <- retryWithDictionary func zstr
+            res <- func zstr
             when (res < 0 && res /= zBufError)
                 $ throwIO $ ZlibException $ fromIntegral res
             avail <- c_get_avail_out zstr
@@ -192,16 +202,7 @@ drain inflateDict fbuff zstr func isFinish = do
                         $ fromIntegral defaultChunkSize
                     return $ Just bs
                 else return Nothing
-  where
-    retryWithDictionary f fstr = do
-	res <- f fstr
-	if (res == zNeedDict)
-	    then maybe (throwIO $ ZlibException $ fromIntegral zNeedDict) -- no dictionary supplied so throw error
-		       (\bs -> (unsafeUseAsCStringLen bs $ \(cstr, len) -> do
-				    c_call_inflate_set_dictionary zstr cstr $ fromIntegral len
-				    f zstr))
-		       inflateDict
-	    else return res
+
 
 -- | As explained in 'withInflateInput', inflation buffers your decompressed
 -- data. After you call 'withInflateInput' with your last chunk of compressed
@@ -231,7 +232,7 @@ withDeflateInput (Deflate (fzstr, fbuff)) bs f =
     withForeignPtr fzstr $ \zstr ->
         unsafeUseAsCStringLen bs $ \(cstr, len) -> do
             c_set_avail_in zstr cstr $ fromIntegral len
-            f $ drain Nothing fbuff zstr c_call_deflate_noflush False
+            f $ drain fbuff zstr c_call_deflate_noflush False
 
 -- | As explained in 'withDeflateInput', deflation buffers your compressed
 -- data. After you call 'withDeflateInput' with your last chunk of decompressed
@@ -241,5 +242,5 @@ withDeflateInput (Deflate (fzstr, fbuff)) bs f =
 finishDeflate :: Deflate -> (IO (Maybe S.ByteString) -> IO a) -> IO a
 finishDeflate (Deflate (fzstr, fbuff)) f =
     withForeignPtr fzstr $ \zstr ->
-        f $ drain Nothing fbuff zstr c_call_deflate_finish True
+        f $ drain fbuff zstr c_call_deflate_finish True
 
