@@ -22,11 +22,13 @@ module Codec.Zlib
     ( -- * Inflate
       Inflate
     , initInflate
+    , initInflateWithDictionary
     , withInflateInput
     , finishInflate
       -- * Deflate
     , Deflate
     , initDeflate
+    , initDeflateWithDictionary
     , withDeflateInput
     , finishDeflate
       -- * Data types
@@ -50,7 +52,8 @@ type ZStreamPair = (ForeignPtr ZStreamStruct, ForeignPtr CChar)
 
 -- | The state of an inflation (eg, decompression) process. All allocated
 -- memory is automatically reclaimed by the garbage collector.
-newtype Inflate = Inflate ZStreamPair
+-- Also can contain the inflation dictionary that is used for decompression.
+newtype Inflate = Inflate (ZStreamPair, Maybe S.ByteString)
 
 -- | The state of a deflation (eg, compression) process. All allocated memory
 -- is automatically reclaimed by the garbage collector.
@@ -77,9 +80,17 @@ newtype Deflate = Deflate ZStreamPair
 -- * #define Z_BUF_ERROR    (-5)
 --
 -- * #define Z_VERSION_ERROR (-6)
+
 data ZlibException = ZlibException Int
     deriving (Show, Typeable)
 instance Exception ZlibException
+
+-- | Some constants for the error codes, used internally
+zNeedDict :: CInt
+zNeedDict = 2
+
+zBufError :: CInt
+zBufError = -5
 
 -- | Initialize an inflation process with the given 'WindowBits'. You will need
 -- to call 'withInflateInput' to feed compressed data to this and
@@ -92,7 +103,21 @@ initInflate w = do
     fbuff <- mallocForeignPtrBytes defaultChunkSize
     withForeignPtr fbuff $ \buff ->
         c_set_avail_out zstr buff $ fromIntegral defaultChunkSize
-    return $ Inflate (fzstr, fbuff)
+    return $ Inflate ((fzstr, fbuff), Nothing)
+
+-- | Initialize an inflation process with the given 'WindowBits'. 
+-- Unlike initInflate a dictionary for inflation is set which must
+-- match the one set during compression.
+initInflateWithDictionary :: WindowBits -> S.ByteString -> IO Inflate
+initInflateWithDictionary w bs = do
+    zstr <- zstreamNew
+    inflateInit2 zstr w
+    fzstr <- newForeignPtr c_free_z_stream_inflate zstr
+    fbuff <- mallocForeignPtrBytes defaultChunkSize
+
+    withForeignPtr fbuff $ \buff ->
+        c_set_avail_out zstr buff $ fromIntegral defaultChunkSize
+    return $ Inflate ((fzstr, fbuff), Just bs)
 
 -- | Initialize a deflation process with the given compression level and
 -- 'WindowBits'. You will need to call 'withDeflateInput' to feed uncompressed
@@ -105,6 +130,25 @@ initDeflate level w = do
     deflateInit2 zstr level w 8 StrategyDefault
     fzstr <- newForeignPtr c_free_z_stream_deflate zstr
     fbuff <- mallocForeignPtrBytes defaultChunkSize
+    withForeignPtr fbuff $ \buff ->
+        c_set_avail_out zstr buff $ fromIntegral defaultChunkSize
+    return $ Deflate (fzstr, fbuff)
+
+-- | Initialize an deflation process with the given compression level and
+-- 'WindowBits'.
+-- Unlike initDeflate a dictionary for deflation is set.
+initDeflateWithDictionary :: Int -- ^ Compression level
+			  -> S.ByteString -- ^ Deflate dictionary
+			  -> WindowBits -> IO Deflate
+initDeflateWithDictionary level bs w = do
+    zstr <- zstreamNew
+    deflateInit2 zstr level w 8 StrategyDefault
+    fzstr <- newForeignPtr c_free_z_stream_deflate zstr
+    fbuff <- mallocForeignPtrBytes defaultChunkSize
+
+    unsafeUseAsCStringLen bs $ \(cstr, len) -> do
+        c_call_deflate_set_dictionary zstr cstr $ fromIntegral len
+
     withForeignPtr fbuff $ \buff ->
         c_set_avail_out zstr buff $ fromIntegral defaultChunkSize
     return $ Deflate (fzstr, fbuff)
@@ -122,21 +166,21 @@ initDeflate level w = do
 withInflateInput
     :: Inflate -> S.ByteString -> (IO (Maybe S.ByteString) -> IO a)
     -> IO a
-withInflateInput (Inflate (fzstr, fbuff)) bs f =
+withInflateInput (Inflate ((fzstr, fbuff), inflateDictionary)) bs f =
     withForeignPtr fzstr $ \zstr ->
         unsafeUseAsCStringLen bs $ \(cstr, len) -> do
             c_set_avail_in zstr cstr $ fromIntegral len
-            f $ drain fbuff zstr c_call_inflate_noflush False
+            f $ drain inflateDictionary fbuff zstr c_call_inflate_noflush False
 
-drain :: ForeignPtr CChar -> ZStream' -> (ZStream' -> IO CInt) -> Bool
+drain :: Maybe S.ByteString -> ForeignPtr CChar -> ZStream' -> (ZStream' -> IO CInt) -> Bool
       -> IO (Maybe S.ByteString)
-drain fbuff zstr func isFinish = do
+drain inflateDict fbuff zstr func isFinish = do
     a <- c_get_avail_in zstr
     if a == 0 && not isFinish
         then return Nothing
         else withForeignPtr fbuff $ \buff -> do
-            res <- func zstr
-            when (res < 0 && res /= (-5))
+            res <- retryWithDictionary func zstr
+            when (res < 0 && res /= zBufError)
                 $ throwIO $ ZlibException $ fromIntegral res
             avail <- c_get_avail_out zstr
             let size = defaultChunkSize - fromIntegral avail
@@ -148,13 +192,23 @@ drain fbuff zstr func isFinish = do
                         $ fromIntegral defaultChunkSize
                     return $ Just bs
                 else return Nothing
+  where
+    retryWithDictionary f fstr = do
+	res <- f fstr
+	if (res == zNeedDict)
+	    then maybe (throwIO $ ZlibException $ fromIntegral zNeedDict) -- no dictionary supplied so throw error
+		       (\bs -> (unsafeUseAsCStringLen bs $ \(cstr, len) -> do
+				    c_call_inflate_set_dictionary zstr cstr $ fromIntegral len
+				    f zstr))
+		       inflateDict
+	    else return res
 
 -- | As explained in 'withInflateInput', inflation buffers your decompressed
 -- data. After you call 'withInflateInput' with your last chunk of compressed
 -- data, you will likely have some data still sitting in the buffer. This
 -- function will return it to you.
 finishInflate :: Inflate -> IO S.ByteString
-finishInflate (Inflate (fzstr, fbuff)) =
+finishInflate (Inflate ((fzstr, fbuff), _)) =
     withForeignPtr fzstr $ \zstr ->
         withForeignPtr fbuff $ \buff -> do
             avail <- c_get_avail_out zstr
@@ -177,7 +231,7 @@ withDeflateInput (Deflate (fzstr, fbuff)) bs f =
     withForeignPtr fzstr $ \zstr ->
         unsafeUseAsCStringLen bs $ \(cstr, len) -> do
             c_set_avail_in zstr cstr $ fromIntegral len
-            f $ drain fbuff zstr c_call_deflate_noflush False
+            f $ drain Nothing fbuff zstr c_call_deflate_noflush False
 
 -- | As explained in 'withDeflateInput', deflation buffers your compressed
 -- data. After you call 'withDeflateInput' with your last chunk of decompressed
@@ -187,4 +241,5 @@ withDeflateInput (Deflate (fzstr, fbuff)) bs f =
 finishDeflate :: Deflate -> (IO (Maybe S.ByteString) -> IO a) -> IO a
 finishDeflate (Deflate (fzstr, fbuff)) f =
     withForeignPtr fzstr $ \zstr ->
-        f $ drain fbuff zstr c_call_deflate_finish True
+        f $ drain Nothing fbuff zstr c_call_deflate_finish True
+
