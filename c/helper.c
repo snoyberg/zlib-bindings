@@ -27,6 +27,16 @@ int deflate_init2(z_stream *stream, int level, int methodBits,
 	return deflateInit2(stream, level, Z_DEFLATED, methodBits, memlevel, strategy);
 }
 
+int inflate_set_dictionary(z_stream *stream, const char* dictionary, 
+                            unsigned int dictLength) {
+        return inflateSetDictionary(stream, dictionary, dictLength);
+}
+
+int deflate_set_dictionary(z_stream *stream, const char* dictionary, 
+                            unsigned int dictLength) {
+        return deflateSetDictionary(stream, dictionary, dictLength);
+}
+
 void free_z_stream_inflate (z_stream *stream)
 {
 	inflateEnd(stream);

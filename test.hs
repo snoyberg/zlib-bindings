@@ -9,6 +9,7 @@ import Codec.Compression.Zlib
 import qualified Codec.Compression.GZip as Gzip
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
+import qualified Data.ByteString.UTF8 as SU8
 import qualified Data.ByteString.Lazy as L
 import Control.Monad (foldM)
 import System.IO.Unsafe (unsafePerformIO)
@@ -50,6 +51,40 @@ prop_compress' lbs = lbs == decompress (compress' lbs)
 license :: S.ByteString
 license = S8.filter (/= '\r') $ unsafePerformIO $ S.readFile "LICENSE"
 
+exampleDict = SU8.fromString "INITIALDICTIONARY"
+
+deflateWithDict :: SU8.ByteString -> L.ByteString -> L.ByteString
+deflateWithDict dict raw = unsafePerformIO $ do
+    def <- initDeflateWithDictionary 7 dict $ WindowBits 15
+    compressed <- foldM (go' def) id $ L.toChunks raw
+    compressed' <- finishDeflate def $ go compressed
+    return $ L.fromChunks $ compressed' []
+  where
+    go' def front bs = withDeflateInput def bs $ go front
+    go front x = do
+        y <- x
+        case y of
+            Nothing -> return front
+            Just z -> go (front . (:) z) x
+
+inflateWithDict :: SU8.ByteString -> L.ByteString -> L.ByteString
+inflateWithDict dict compressed = unsafePerformIO $ do
+    inf <- initInflateWithDictionary (WindowBits 15) dict
+    decompressed <- foldM (go' inf) id $ L.toChunks compressed
+    final <- finishInflate inf
+    return $ L.fromChunks $ decompressed [final]
+  where
+    go' inf front bs = withInflateInput inf bs $ go front
+    go front x = do
+        y <- x
+        case y of
+            Nothing -> return front
+            Just z -> go (front . (:) z) x
+
+prop_inflate_deflate_with_dictionary :: L.ByteString -> Bool
+prop_inflate_deflate_with_dictionary bs =
+    bs == (inflateWithDict exampleDict . deflateWithDict exampleDict) bs
+
 test_license_single_deflate :: Assertion
 test_license_single_deflate = do
     def <- initDeflate 8 $ WindowBits 31
@@ -63,6 +98,13 @@ test_license_single_deflate = do
         case y of
             Nothing -> return front
             Just z -> go (front . (:) z) x
+
+test_fail_deflate_inflate_different_dict :: Assertion
+test_fail_deflate_inflate_different_dict = do
+    raw <- L.readFile "LICENSE"
+    deflated <- return $ deflateWithDict exampleDict raw
+    inflated <- return $ inflateWithDict (SU8.drop 1 exampleDict) deflated
+    assertBool $ L.null inflated
 
 test_license_single_inflate :: Assertion
 test_license_single_inflate = do
