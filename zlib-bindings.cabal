@@ -36,12 +36,12 @@ test-suite test
     hs-source-dirs: test
     type: exitcode-stdio-1.0
     build-depends: base                  >= 4       && < 5
-                 , bytestring            >= 0.9.1.4 && < 0.10
+                 , bytestring
                  , zlib
                  , zlib-bindings
-                 , HTF                   >= 0.5     && < 0.9
-                 , QuickCheck            >= 2.1.2
-                 , utf8-string
+                 , hspec
+                 , QuickCheck            >= 2.3
+                 , HUnit
     ghc-options:     -Wall
 
 source-repository head
