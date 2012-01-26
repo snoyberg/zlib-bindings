@@ -5,6 +5,7 @@ license-file:    LICENSE
 author:          Michael Snoyman <michael@snoyman.com>
 maintainer:      Michael Snoyman <michael@snoyman.com>
 synopsis:        Low-level bindings to the zlib package.
+description:     Provides necessary functions for producing a streaming interface. This is used for example by @zlib-conduit@ and @zlib-enum@.
 category:        Codec
 stability:       Experimental
 cabal-version:   >= 1.8
