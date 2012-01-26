@@ -13,7 +13,7 @@ import qualified Codec.Compression.GZip as Gzip
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
 import qualified Data.ByteString.Lazy as L
-import Control.Monad (foldM)
+import Control.Monad (foldM, forM_, forM)
 import System.IO.Unsafe (unsafePerformIO)
 
 decompress' :: L.ByteString -> L.ByteString
@@ -174,3 +174,34 @@ main = hspecX $ do
             deflated <- foldM (go' def) id $ L.toChunks lbs
             deflated' <- finishDeflate def $ go deflated
             return $ lbs == decompress (L.fromChunks (deflated' []))
+
+    describe "flushing" $ do
+        let helper wb = do
+                let bss0 = replicate 5000 "abc"
+                def <- initDeflate 9 wb
+                inf <- initInflate wb
+
+                let popList pop = do
+                        mx <- pop
+                        case mx of
+                            Nothing -> return []
+                            Just x -> do
+                                xs <- popList pop
+                                return $ x : xs
+
+                let callback name expected pop = do
+                        bssDeflated <- popList pop
+                        bsInflated <- fmap (S.concat . concat) $ forM bssDeflated $ \bs -> do
+                            x <- withInflateInput inf bs popList
+                            y <- flushInflate inf
+                            return $ x ++ [y]
+                        if bsInflated == expected
+                            then return ()
+                            else error $ "callback " ++ name ++ ", got: " ++ show bsInflated ++ ", expected: " ++ show expected
+
+                forM_ (zip [1..] bss0) $ \(i, bs) -> do
+                    withDeflateInput def bs $ callback ("loop" ++ show (i :: Int)) ""
+                    flushDeflate def $ callback ("loop" ++ show (i :: Int)) bs
+                finishDeflate def $ callback "finish" ""
+        it "zlib" $ helper defaultWindowBits
+        it "gzip" $ helper $ WindowBits 31

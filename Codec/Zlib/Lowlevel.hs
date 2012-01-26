@@ -16,6 +16,7 @@ module Codec.Zlib.Lowlevel
     , c_call_inflate_noflush
     , c_call_deflate_noflush
     , c_call_deflate_finish
+    , c_call_deflate_flush
     , c_call_deflate_set_dictionary
     , c_call_inflate_set_dictionary
     ) where
@@ -80,6 +81,9 @@ foreign import ccall unsafe "call_deflate_noflush"
 
 foreign import ccall unsafe "call_deflate_finish"
     c_call_deflate_finish :: ZStream' -> IO CInt
+
+foreign import ccall unsafe "call_deflate_flush"
+    c_call_deflate_flush :: ZStream' -> IO CInt
 
 foreign import ccall unsafe "deflate_set_dictionary"
     c_call_deflate_set_dictionary :: ZStream' -> Ptr CChar -> CUInt -> IO ()

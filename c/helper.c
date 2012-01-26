@@ -81,6 +81,11 @@ int call_deflate_noflush (z_stream *stream)
 	return deflate(stream, Z_NO_FLUSH);
 }
 
+int call_deflate_flush (z_stream *stream)
+{
+	return deflate(stream, Z_SYNC_FLUSH);
+}
+
 int call_deflate_finish (z_stream *stream)
 {
 	return deflate(stream, Z_FINISH);

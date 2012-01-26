@@ -25,12 +25,14 @@ module Codec.Zlib
     , initInflateWithDictionary
     , withInflateInput
     , finishInflate
+    , flushInflate
       -- * Deflate
     , Deflate
     , initDeflate
     , initDeflateWithDictionary
     , withDeflateInput
     , finishDeflate
+    , flushDeflate
       -- * Data types
     , WindowBits (WindowBits)
     , defaultWindowBits
@@ -214,7 +216,19 @@ finishInflate (Inflate ((fzstr, fbuff), _)) =
         withForeignPtr fbuff $ \buff -> do
             avail <- c_get_avail_out zstr
             let size = defaultChunkSize - fromIntegral avail
-            S.packCStringLen (buff, size)
+            bs <- S.packCStringLen (buff, size)
+            c_set_avail_out zstr buff
+                $ fromIntegral defaultChunkSize
+            return bs
+
+-- | Flush the inflation buffer. Useful for interactive application.
+--
+-- This is actually a synonym for 'finishInflate'. It is provided for its more
+-- semantic name.
+--
+-- Since 0.0.3
+flushInflate :: Inflate -> IO S.ByteString
+flushInflate = finishInflate
 
 -- | Feed the given 'S.ByteString' to the deflater. This function takes a
 -- function argument which takes a \"popper\". A popper is an IO action that
@@ -244,3 +258,12 @@ finishDeflate (Deflate (fzstr, fbuff)) f =
     withForeignPtr fzstr $ \zstr ->
         f $ drain fbuff zstr c_call_deflate_finish True
 
+-- | Flush the deflation buffer. Useful for interactive application.
+--
+-- Internally this passes Z_SYNC_FLUSH to the zlib library.
+--
+-- Since 0.0.3
+flushDeflate :: Deflate -> (IO (Maybe S.ByteString) -> IO a) -> IO a
+flushDeflate (Deflate (fzstr, fbuff)) f =
+    withForeignPtr fzstr $ \zstr ->
+        f $ drain fbuff zstr c_call_deflate_flush True
