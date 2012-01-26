@@ -34,7 +34,7 @@ module Codec.Zlib
     , finishDeflate
     , flushDeflate
       -- * Data types
-    , WindowBits (WindowBits)
+    , WindowBits (..)
     , defaultWindowBits
     , ZlibException (..)
     ) where
