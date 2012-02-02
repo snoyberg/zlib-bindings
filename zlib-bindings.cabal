@@ -1,5 +1,5 @@
 name:            zlib-bindings
-version:         0.0.3
+version:         0.0.3.1
 license:         BSD3
 license-file:    LICENSE
 author:          Michael Snoyman <michael@snoyman.com>
@@ -18,7 +18,7 @@ extra-source-files: cbits/crc32.h cbits/inffast.h cbits/inflate.h
 library
     build-depends: base                  >= 4       && < 5
                  , bytestring            >= 0.9.1.4 && < 0.10
-                 , zlib                  >= 0.5.2.0 && < 0.6
+                 , zlib                  >= 0.5.2.0 && < 0.5.3.2
     exposed-modules: Codec.Zlib
                      Codec.Zlib.Lowlevel
     ghc-options:     -Wall
