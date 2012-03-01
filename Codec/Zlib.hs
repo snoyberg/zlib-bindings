@@ -23,20 +23,21 @@ module Codec.Zlib
       Inflate
     , initInflate
     , initInflateWithDictionary
-    , withInflateInput
+    , feedInflate
     , finishInflate
     , flushInflate
       -- * Deflate
     , Deflate
     , initDeflate
     , initDeflateWithDictionary
-    , withDeflateInput
+    , feedDeflate
     , finishDeflate
     , flushDeflate
       -- * Data types
     , WindowBits (..)
     , defaultWindowBits
     , ZlibException (..)
+    , Popper
     ) where
 
 import Codec.Zlib.Lowlevel
@@ -140,8 +141,8 @@ initDeflate level w = do
 -- 'WindowBits'.
 -- Unlike initDeflate a dictionary for deflation is set.
 initDeflateWithDictionary :: Int -- ^ Compression level
-			  -> S.ByteString -- ^ Deflate dictionary
-			  -> WindowBits -> IO Deflate
+                          -> S.ByteString -- ^ Deflate dictionary
+                          -> WindowBits -> IO Deflate
 initDeflateWithDictionary level bs w = do
     zstr <- zstreamNew
     deflateInit2 zstr level w 8 StrategyDefault
@@ -165,28 +166,40 @@ initDeflateWithDictionary level bs w = do
 -- until that much decompressed data is available. After you have fed all of
 -- the compressed data to this function, you can extract your final chunk of
 -- decompressed data using 'finishInflate'.
-withInflateInput
-    :: Inflate -> S.ByteString -> (IO (Maybe S.ByteString) -> IO a)
-    -> IO a
-withInflateInput (Inflate ((fzstr, fbuff), inflateDictionary)) bs f =
+feedInflate
+    :: Inflate
+    -> S.ByteString
+    -> IO Popper
+feedInflate (Inflate ((fzstr, fbuff), inflateDictionary)) bs = do
     withForeignPtr fzstr $ \zstr ->
-        unsafeUseAsCStringLen bs $ \(cstr, len) -> do
+        unsafeUseAsCStringLen bs $ \(cstr, len) ->
             c_set_avail_in zstr cstr $ fromIntegral len
-            f $ drain fbuff zstr inflate False
+    return $ drain fbuff fzstr (Just bs) inflate False
   where
     inflate zstr = do
-	res <- c_call_inflate_noflush zstr
-	if (res == zNeedDict)
-	    then maybe (throwIO $ ZlibException $ fromIntegral zNeedDict) -- no dictionary supplied so throw error
-		       (\dict -> (unsafeUseAsCStringLen dict $ \(cstr, len) -> do
-				    c_call_inflate_set_dictionary zstr cstr $ fromIntegral len
-				    c_call_inflate_noflush zstr))
-		       inflateDictionary
-	    else return res
+        res <- c_call_inflate_noflush zstr
+        if (res == zNeedDict)
+            then maybe (throwIO $ ZlibException $ fromIntegral zNeedDict) -- no dictionary supplied so throw error
+                       (\dict -> (unsafeUseAsCStringLen dict $ \(cstr, len) -> do
+                                    c_call_inflate_set_dictionary zstr cstr $ fromIntegral len
+                                    c_call_inflate_noflush zstr))
+                       inflateDictionary
+            else return res
 
-drain :: ForeignPtr CChar -> ZStream' -> (ZStream' -> IO CInt) -> Bool
-      -> IO (Maybe S.ByteString)
-drain fbuff zstr func isFinish = do
+type Popper = IO (Maybe S.ByteString)
+
+-- | Ensure that the given @ByteString@ is not deallocated.
+keepAlive :: Maybe S.ByteString -> IO a -> IO a
+keepAlive Nothing = id
+keepAlive (Just bs) = unsafeUseAsCStringLen bs . const
+
+drain :: ForeignPtr CChar
+      -> ForeignPtr ZStreamStruct
+      -> Maybe S.ByteString
+      -> (ZStream' -> IO CInt)
+      -> Bool
+      -> Popper
+drain fbuff fzstr mbs func isFinish = withForeignPtr fzstr $ \zstr -> keepAlive mbs $ do
     a <- c_get_avail_in zstr
     if a == 0 && not isFinish
         then return Nothing
@@ -217,8 +230,7 @@ finishInflate (Inflate ((fzstr, fbuff), _)) =
             avail <- c_get_avail_out zstr
             let size = defaultChunkSize - fromIntegral avail
             bs <- S.packCStringLen (buff, size)
-            c_set_avail_out zstr buff
-                $ fromIntegral defaultChunkSize
+            c_set_avail_out zstr buff $ fromIntegral defaultChunkSize
             return bs
 
 -- | Flush the inflation buffer. Useful for interactive application.
@@ -240,30 +252,27 @@ flushInflate = finishInflate
 -- until that much compressed data is available. After you have fed all of the
 -- decompressed data to this function, you can extract your final chunks of
 -- compressed data using 'finishDeflate'.
-withDeflateInput
-    :: Deflate -> S.ByteString -> (IO (Maybe S.ByteString) -> IO a) -> IO a
-withDeflateInput (Deflate (fzstr, fbuff)) bs f =
+feedDeflate :: Deflate -> S.ByteString -> IO Popper
+feedDeflate (Deflate (fzstr, fbuff)) bs = do
     withForeignPtr fzstr $ \zstr ->
         unsafeUseAsCStringLen bs $ \(cstr, len) -> do
             c_set_avail_in zstr cstr $ fromIntegral len
-            f $ drain fbuff zstr c_call_deflate_noflush False
+    return $ drain fbuff fzstr (Just bs) c_call_deflate_noflush False
 
 -- | As explained in 'withDeflateInput', deflation buffers your compressed
 -- data. After you call 'withDeflateInput' with your last chunk of decompressed
 -- data, we need to flush the rest of the data waiting to be deflated. This
 -- function takes a function parameter which accepts a \"popper\", just like
 -- 'withDeflateInput'.
-finishDeflate :: Deflate -> (IO (Maybe S.ByteString) -> IO a) -> IO a
-finishDeflate (Deflate (fzstr, fbuff)) f =
-    withForeignPtr fzstr $ \zstr ->
-        f $ drain fbuff zstr c_call_deflate_finish True
+finishDeflate :: Deflate -> Popper
+finishDeflate (Deflate (fzstr, fbuff)) =
+    drain fbuff fzstr Nothing c_call_deflate_finish True
 
 -- | Flush the deflation buffer. Useful for interactive application.
 --
 -- Internally this passes Z_SYNC_FLUSH to the zlib library.
 --
 -- Since 0.0.3
-flushDeflate :: Deflate -> (IO (Maybe S.ByteString) -> IO a) -> IO a
-flushDeflate (Deflate (fzstr, fbuff)) f =
-    withForeignPtr fzstr $ \zstr ->
-        f $ drain fbuff zstr c_call_deflate_flush True
+flushDeflate :: Deflate -> Popper
+flushDeflate (Deflate (fzstr, fbuff)) =
+    drain fbuff fzstr Nothing c_call_deflate_flush True

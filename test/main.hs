@@ -23,7 +23,7 @@ decompress' gziped = unsafePerformIO $ do
     final <- finishInflate inf
     return $ L.fromChunks $ ungziped [final]
   where
-    go' inf front bs = withInflateInput inf bs $ go front
+    go' inf front bs = feedInflate inf bs >>= go front
     go front x = do
         y <- x
         case y of
@@ -39,10 +39,10 @@ compress' :: L.ByteString -> L.ByteString
 compress' raw = unsafePerformIO $ do
     def <- initDeflate 7 defaultWindowBits
     gziped <- foldM (go' def) id $ L.toChunks raw
-    gziped' <- finishDeflate def $ go gziped
+    gziped' <- go gziped $ finishDeflate def
     return $ L.fromChunks $ gziped' []
   where
-    go' def front bs = withDeflateInput def bs $ go front
+    go' def front bs = feedDeflate def bs >>= go front
     go front x = do
         y <- x
         case y of
@@ -59,10 +59,10 @@ deflateWithDict :: S.ByteString -> L.ByteString -> L.ByteString
 deflateWithDict dict raw = unsafePerformIO $ do
     def <- initDeflateWithDictionary 7 dict $ WindowBits 15
     compressed <- foldM (go' def) id $ L.toChunks raw
-    compressed' <- finishDeflate def $ go compressed
+    compressed' <- go compressed $ finishDeflate def
     return $ L.fromChunks $ compressed' []
   where
-    go' def front bs = withDeflateInput def bs $ go front
+    go' def front bs = feedDeflate def bs >>= go front
     go front x = do
         y <- x
         case y of
@@ -76,7 +76,7 @@ inflateWithDict dict compressed = unsafePerformIO $ do
     final <- finishInflate inf
     return $ L.fromChunks $ decompressed [final]
   where
-    go' inf front bs = withInflateInput inf bs $ go front
+    go' inf front bs = feedInflate inf bs >>= go front
     go front x = do
         y <- x
         case y of
@@ -106,8 +106,8 @@ main = hspecX $ do
                         Nothing -> return front
                         Just z -> go (front . (:) z) x
             def <- initDeflate 8 $ WindowBits 31
-            gziped <- withDeflateInput def license $ go id
-            gziped' <- finishDeflate def $ go gziped
+            gziped <- feedDeflate def license >>= go id
+            gziped' <- go gziped $ finishDeflate def
             let raw' = L.fromChunks [license]
             raw' @?= Gzip.decompress (L.fromChunks $ gziped' [])
 
@@ -119,12 +119,13 @@ main = hspecX $ do
                         Just z -> go (front . (:) z) x
             gziped <- S.readFile "LICENSE.gz"
             inf <- initInflate $ WindowBits 31
-            ungziped <- withInflateInput inf gziped $ go id
+            popper <- feedInflate inf gziped
+            ungziped <- go id popper
             final <- finishInflate inf
             license @?= (S.concat $ ungziped [final])
 
         it "multi deflate" $ do
-            let go' inf front bs = withDeflateInput inf bs $ go front
+            let go' inf front bs = feedDeflate inf bs >>= go front
                 go front x = do
                     y <- x
                     case y of
@@ -132,12 +133,12 @@ main = hspecX $ do
                         Just z -> go (front . (:) z) x
             def <- initDeflate 5 $ WindowBits 31
             gziped <- foldM (go' def) id $ map S.singleton $ S.unpack license
-            gziped' <- finishDeflate def $ go gziped
+            gziped' <- go gziped $ finishDeflate def
             let raw' = L.fromChunks [license]
             raw' @?= (Gzip.decompress $ L.fromChunks $ gziped' [])
 
         it "multi inflate" $ do
-            let go' inf front bs = withInflateInput inf bs $ go front
+            let go' inf front bs = feedInflate inf bs >>= go front
                 go front x = do
                     y <- x
                     case y of
@@ -153,7 +154,7 @@ main = hspecX $ do
     describe "lbs zlib" $ do
         prop "inflate" $ \lbs -> unsafePerformIO $ do
             let glbs = compress lbs
-                go' inf front bs = withInflateInput inf bs $ go front
+                go' inf front bs = feedInflate inf bs >>= go front
                 go front x = do
                     y <- x
                     case y of
@@ -164,7 +165,7 @@ main = hspecX $ do
             final <- finishInflate inf
             return $ lbs == L.fromChunks (inflated [final])
         prop "deflate" $ \lbs -> unsafePerformIO $ do
-            let go' inf front bs = withDeflateInput inf bs $ go front
+            let go' inf front bs = feedDeflate inf bs >>= go front
                 go front x = do
                     y <- x
                     case y of
@@ -172,7 +173,7 @@ main = hspecX $ do
                         Just z -> go (front . (:) z) x
             def <- initDeflate 7 defaultWindowBits
             deflated <- foldM (go' def) id $ L.toChunks lbs
-            deflated' <- finishDeflate def $ go deflated
+            deflated' <- go deflated $ finishDeflate def
             return $ lbs == decompress (L.fromChunks (deflated' []))
 
     describe "flushing" $ do
@@ -192,7 +193,7 @@ main = hspecX $ do
                 let callback name expected pop = do
                         bssDeflated <- popList pop
                         bsInflated <- fmap (S.concat . concat) $ forM bssDeflated $ \bs -> do
-                            x <- withInflateInput inf bs popList
+                            x <- feedInflate inf bs >>= popList
                             y <- flushInflate inf
                             return $ x ++ [y]
                         if bsInflated == expected
@@ -200,8 +201,8 @@ main = hspecX $ do
                             else error $ "callback " ++ name ++ ", got: " ++ show bsInflated ++ ", expected: " ++ show expected
 
                 forM_ (zip [1..] bss0) $ \(i, bs) -> do
-                    withDeflateInput def bs $ callback ("loop" ++ show (i :: Int)) ""
-                    flushDeflate def $ callback ("loop" ++ show (i :: Int)) bs
-                finishDeflate def $ callback "finish" ""
+                    feedDeflate def bs >>= callback ("loop" ++ show (i :: Int)) ""
+                    callback ("loop" ++ show (i :: Int)) bs $ flushDeflate def
+                callback "finish" "" $ finishDeflate def
         it "zlib" $ helper defaultWindowBits
         it "gzip" $ helper $ WindowBits 31
