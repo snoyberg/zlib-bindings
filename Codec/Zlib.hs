@@ -11,8 +11,8 @@
 -- A simple streaming compressor in pseudo-code would look like:
 --
 -- > def <- initDeflate ...
--- > withDeflateInput def rawContent1 sendCompressedData
--- > withDeflateInput def rawContent2 sendCompressedData
+-- > popper <- feedDeflate def rawContent
+-- > pullPopper popper
 -- > ...
 -- > finishDeflate def sendCompressedData
 --
@@ -96,7 +96,7 @@ zBufError :: CInt
 zBufError = -5
 
 -- | Initialize an inflation process with the given 'WindowBits'. You will need
--- to call 'withInflateInput' to feed compressed data to this and
+-- to call 'feedInflate' to feed compressed data to this and
 -- 'finishInflate' to extract the final chunk of decompressed data.
 initInflate :: WindowBits -> IO Inflate
 initInflate w = do
@@ -123,7 +123,7 @@ initInflateWithDictionary w bs = do
     return $ Inflate ((fzstr, fbuff), Just bs)
 
 -- | Initialize a deflation process with the given compression level and
--- 'WindowBits'. You will need to call 'withDeflateInput' to feed uncompressed
+-- 'WindowBits'. You will need to call 'feedDeflate' to feed uncompressed
 -- data to this and 'finishDeflate' to extract the final chunks of compressed
 -- data.
 initDeflate :: Int -- ^ Compression level
@@ -219,8 +219,8 @@ drain fbuff fzstr mbs func isFinish = withForeignPtr fzstr $ \zstr -> keepAlive 
                 else return Nothing
 
 
--- | As explained in 'withInflateInput', inflation buffers your decompressed
--- data. After you call 'withInflateInput' with your last chunk of compressed
+-- | As explained in 'feedInflate', inflation buffers your decompressed
+-- data. After you call 'feedInflate' with your last chunk of compressed
 -- data, you will likely have some data still sitting in the buffer. This
 -- function will return it to you.
 finishInflate :: Inflate -> IO S.ByteString
@@ -259,11 +259,11 @@ feedDeflate (Deflate (fzstr, fbuff)) bs = do
             c_set_avail_in zstr cstr $ fromIntegral len
     return $ drain fbuff fzstr (Just bs) c_call_deflate_noflush False
 
--- | As explained in 'withDeflateInput', deflation buffers your compressed
--- data. After you call 'withDeflateInput' with your last chunk of decompressed
+-- | As explained in 'feedDeflate', deflation buffers your compressed
+-- data. After you call 'feedDeflate' with your last chunk of uncompressed
 -- data, we need to flush the rest of the data waiting to be deflated. This
 -- function takes a function parameter which accepts a \"popper\", just like
--- 'withDeflateInput'.
+-- 'feedDeflate'.
 finishDeflate :: Deflate -> Popper
 finishDeflate (Deflate (fzstr, fbuff)) =
     drain fbuff fzstr Nothing c_call_deflate_finish True
