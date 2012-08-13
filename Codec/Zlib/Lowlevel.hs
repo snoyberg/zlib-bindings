@@ -13,6 +13,7 @@ module Codec.Zlib.Lowlevel
     , c_set_avail_out
     , c_get_avail_out
     , c_get_avail_in
+    , c_get_next_in
     , c_call_inflate_noflush
     , c_call_deflate_noflush
     , c_call_deflate_finish
@@ -72,6 +73,9 @@ foreign import ccall unsafe "get_avail_out"
 
 foreign import ccall unsafe "get_avail_in"
     c_get_avail_in :: ZStream' -> IO CUInt
+
+foreign import ccall unsafe "get_next_in"
+    c_get_next_in :: ZStream' -> IO (Ptr CChar)
 
 foreign import ccall unsafe "call_inflate_noflush"
     c_call_inflate_noflush :: ZStream' -> IO CInt

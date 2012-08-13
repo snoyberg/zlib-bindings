@@ -70,6 +70,11 @@ unsigned int get_avail_out (z_stream *stream)
 	return stream->avail_out;
 }
 
+char* get_next_in (z_stream *stream)
+{
+	return stream->next_in;
+}
+
 void free_z_stream_deflate (z_stream *stream)
 {
 	deflateEnd(stream);
