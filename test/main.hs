@@ -1,8 +1,7 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-import Test.Hspec.Monadic
-import Test.Hspec.HUnit ()
+import Test.Hspec
 import Test.Hspec.QuickCheck (prop)
 import Test.QuickCheck (Arbitrary (..))
 import Test.HUnit
