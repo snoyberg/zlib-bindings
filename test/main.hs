@@ -84,7 +84,7 @@ inflateWithDict dict compressed = unsafePerformIO $ do
             Just z -> go (front . (:) z) x
 
 main :: IO ()
-main = hspecX $ do
+main = hspec $ do
     describe "inflate/deflate" $ do
         prop "decompress'" $ \lbs -> lbs == decompress' (compress lbs)
         prop "compress'" $ \lbs -> lbs == decompress (compress' lbs)
