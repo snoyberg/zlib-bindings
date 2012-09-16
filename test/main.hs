@@ -1,11 +1,9 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-import Test.Hspec.Monadic
-import Test.Hspec.HUnit ()
+import Test.Hspec
 import Test.Hspec.QuickCheck (prop)
 import Test.QuickCheck (Arbitrary (..))
-import Test.HUnit
 
 import Codec.Zlib
 import Codec.Compression.Zlib
@@ -84,7 +82,7 @@ inflateWithDict dict compressed = unsafePerformIO $ do
             Just z -> go (front . (:) z) x
 
 main :: IO ()
-main = hspecX $ do
+main = hspec $ do
     describe "inflate/deflate" $ do
         prop "decompress'" $ \lbs -> lbs == decompress' (compress lbs)
         prop "compress'" $ \lbs -> lbs == decompress (compress' lbs)
@@ -96,7 +94,7 @@ main = hspecX $ do
             raw <- L.readFile "LICENSE"
             deflated <- return $ deflateWithDict exampleDict raw
             inflated <- return $ inflateWithDict (S.drop 1 exampleDict) deflated
-            assertBool "is null" $ L.null inflated
+            inflated `shouldSatisfy` L.null
 
     describe "license" $ do
         it "single deflate" $ do
@@ -109,7 +107,7 @@ main = hspecX $ do
             gziped <- feedDeflate def license >>= go id
             gziped' <- go gziped $ finishDeflate def
             let raw' = L.fromChunks [license]
-            raw' @?= Gzip.decompress (L.fromChunks $ gziped' [])
+            raw' `shouldBe` Gzip.decompress (L.fromChunks $ gziped' [])
 
         it "single inflate" $ do
             let go front x = do
@@ -122,7 +120,7 @@ main = hspecX $ do
             popper <- feedInflate inf gziped
             ungziped <- go id popper
             final <- finishInflate inf
-            license @?= (S.concat $ ungziped [final])
+            license `shouldBe` (S.concat $ ungziped [final])
 
         it "multi deflate" $ do
             let go' inf front bs = feedDeflate inf bs >>= go front
@@ -135,7 +133,7 @@ main = hspecX $ do
             gziped <- foldM (go' def) id $ map S.singleton $ S.unpack license
             gziped' <- go gziped $ finishDeflate def
             let raw' = L.fromChunks [license]
-            raw' @?= (Gzip.decompress $ L.fromChunks $ gziped' [])
+            raw' `shouldBe` (Gzip.decompress $ L.fromChunks $ gziped' [])
 
         it "multi inflate" $ do
             let go' inf front bs = feedInflate inf bs >>= go front
@@ -149,7 +147,7 @@ main = hspecX $ do
             inf <- initInflate $ WindowBits 31
             ungziped' <- foldM (go' inf) id gziped'
             final <- finishInflate inf
-            license @?= (S.concat $ ungziped' [final])
+            license `shouldBe` (S.concat $ ungziped' [final])
 
     describe "lbs zlib" $ do
         prop "inflate" $ \lbs -> unsafePerformIO $ do
