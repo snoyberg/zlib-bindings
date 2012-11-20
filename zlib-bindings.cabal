@@ -1,5 +1,5 @@
 name:            zlib-bindings
-version:         0.1.1.1
+version:         0.1.1.2
 license:         BSD3
 license-file:    LICENSE
 author:          Michael Snoyman <michael@snoyman.com>
@@ -13,7 +13,8 @@ build-type:      Simple
 homepage:        http://github.com/snoyberg/zlib-bindings
 extra-source-files: cbits/crc32.h cbits/inffast.h cbits/inflate.h
                     cbits/trees.h cbits/deflate.h cbits/inffixed.h
-                    cbits/inftrees.h cbits/zutil.h, test/main.hs
+                    cbits/inftrees.h cbits/zutil.h, test/main.hs,
+                    LICENSE.gz
 
 library
     build-depends: base                  >= 4       && < 5
