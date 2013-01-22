@@ -156,10 +156,10 @@ initDeflateWithDictionary level bs w = do
         c_set_avail_out zstr buff $ fromIntegral defaultChunkSize
     return $ Deflate (fzstr, fbuff)
 
--- | Feed the given 'S.ByteString' to the inflater. This function takes a
--- function argument which takes a \"popper\". A popper is an IO action that
--- will return the next bit of inflated data, returning 'Nothing' when there is
--- no more data to be popped.
+-- | Feed the given 'S.ByteString' to the inflater. Return a 'Popper',
+-- an IO action that returns the decompressed data a chunk at a time.
+-- The 'Popper' must be called to exhaustion before using the 'Inflate'
+-- object again.
 --
 -- Note that this function automatically buffers the output to
 -- 'defaultChunkSize', and therefore you won't get any data from the popper
@@ -186,6 +186,8 @@ feedInflate (Inflate ((fzstr, fbuff), inflateDictionary)) bs = do
                        inflateDictionary
             else return res
 
+-- | An IO action that returns the next chunk of data, returning 'Nothing' when
+-- there is no more data to be popped.
 type Popper = IO (Maybe S.ByteString)
 
 -- | Ensure that the given @ByteString@ is not deallocated.
@@ -242,10 +244,10 @@ finishInflate (Inflate ((fzstr, fbuff), _)) =
 flushInflate :: Inflate -> IO S.ByteString
 flushInflate = finishInflate
 
--- | Feed the given 'S.ByteString' to the deflater. This function takes a
--- function argument which takes a \"popper\". A popper is an IO action that
--- will return the next bit of deflated data, returning 'Nothing' when there is
--- no more data to be popped.
+-- | Feed the given 'S.ByteString' to the deflater. Return a 'Popper',
+-- an IO action that returns the compressed data a chunk at a time.
+-- The 'Popper' must be called to exhaustion before using the 'Deflate'
+-- object again.
 --
 -- Note that this function automatically buffers the output to
 -- 'defaultChunkSize', and therefore you won't get any data from the popper
@@ -261,16 +263,16 @@ feedDeflate (Deflate (fzstr, fbuff)) bs = do
 
 -- | As explained in 'feedDeflate', deflation buffers your compressed
 -- data. After you call 'feedDeflate' with your last chunk of uncompressed
--- data, we need to flush the rest of the data waiting to be deflated. This
--- function takes a function parameter which accepts a \"popper\", just like
--- 'feedDeflate'.
+-- data, use this to flush the rest of the data and signal end of input.
 finishDeflate :: Deflate -> Popper
 finishDeflate (Deflate (fzstr, fbuff)) =
     drain fbuff fzstr Nothing c_call_deflate_finish True
 
 -- | Flush the deflation buffer. Useful for interactive application.
---
 -- Internally this passes Z_SYNC_FLUSH to the zlib library.
+--
+-- Unlike 'finishDeflate', 'flushDeflate' does not signal end of input,
+-- meaning you can feed more uncompressed data afterward.
 --
 -- Since 0.0.3
 flushDeflate :: Deflate -> Popper
