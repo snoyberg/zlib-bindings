@@ -11,8 +11,10 @@ import qualified Codec.Compression.GZip as Gzip
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as S8
 import qualified Data.ByteString.Lazy as L
+import qualified Data.ByteString.Lazy.Internal as LI
 import Control.Monad (foldM, forM_, forM)
 import System.IO.Unsafe (unsafePerformIO)
+import qualified Codec.Compression.Zlib.Raw as Raw
 
 decompress' :: L.ByteString -> L.ByteString
 decompress' gziped = unsafePerformIO $ do
@@ -204,3 +206,45 @@ main = hspec $ do
                 callback "finish" "" $ finishDeflate def
         it "zlib" $ helper defaultWindowBits
         it "gzip" $ helper $ WindowBits 31
+    describe "large raw #9" $ do
+        let size = fromIntegral $ LI.defaultChunkSize * 4 + 1
+            input = L.replicate size 10
+        it "compressing" $ do
+            output <- fmap Raw.decompress $ compressRaw input
+            L.all (== 10) output `shouldBe` True
+            L.length output `shouldBe` L.length input
+        it "decompressing" $ do
+            output <- decompressRaw $ Raw.compress input
+            L.all (== 10) output `shouldBe` True
+            L.length output `shouldBe` L.length input
+
+rawWindowBits :: WindowBits
+rawWindowBits = WindowBits (-15)
+
+decompressRaw :: L.ByteString -> IO L.ByteString
+decompressRaw gziped = do
+    inf <- initInflate rawWindowBits
+    ungziped <- foldM (go' inf) id $ L.toChunks gziped
+    final <- finishInflate inf
+    return $ L.fromChunks $ ungziped [final]
+  where
+    go' inf front bs = feedInflate inf bs >>= go front
+    go front x = do
+        y <- x
+        case y of
+            Nothing -> return front
+            Just z -> go (front . (:) z) x
+
+compressRaw :: L.ByteString -> IO L.ByteString
+compressRaw raw = do
+    def <- initDeflate 1 rawWindowBits
+    gziped <- foldM (go' def) id $ L.toChunks raw
+    gziped' <- go gziped $ finishDeflate def
+    return $ L.fromChunks $ gziped' []
+  where
+    go' def front bs = feedDeflate def bs >>= go front
+    go front x = do
+        y <- x
+        case y of
+            Nothing -> return front
+            Just z -> go (front . (:) z) x

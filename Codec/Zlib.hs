@@ -202,23 +202,19 @@ drain :: ForeignPtr CChar
       -> Bool
       -> Popper
 drain fbuff fzstr mbs func isFinish = withForeignPtr fzstr $ \zstr -> keepAlive mbs $ do
-    a <- c_get_avail_in zstr
-    if a == 0 && not isFinish
-        then return Nothing
-        else withForeignPtr fbuff $ \buff -> do
-            res <- func zstr
-            when (res < 0 && res /= zBufError)
-                $ throwIO $ ZlibException $ fromIntegral res
-            avail <- c_get_avail_out zstr
-            let size = defaultChunkSize - fromIntegral avail
-            let toOutput = avail == 0 || (isFinish && size /= 0)
-            if toOutput
-                then do
-                    bs <- S.packCStringLen (buff, size)
-                    c_set_avail_out zstr buff
-                        $ fromIntegral defaultChunkSize
-                    return $ Just bs
-                else return Nothing
+    res <- func zstr
+    when (res < 0 && res /= zBufError)
+        $ throwIO $ ZlibException $ fromIntegral res
+    avail <- c_get_avail_out zstr
+    let size = defaultChunkSize - fromIntegral avail
+        toOutput = avail == 0 || (isFinish && size /= 0)
+    if toOutput
+        then withForeignPtr fbuff $ \buff -> do
+            bs <- S.packCStringLen (buff, size)
+            c_set_avail_out zstr buff
+                $ fromIntegral defaultChunkSize
+            return $ Just bs
+        else return Nothing
 
 
 -- | As explained in 'feedInflate', inflation buffers your decompressed
