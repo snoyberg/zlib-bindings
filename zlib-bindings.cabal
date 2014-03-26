@@ -1,11 +1,11 @@
 name:            zlib-bindings
-version:         0.1.1.4
+version:         0.1.1.5
 license:         BSD3
 license-file:    LICENSE
 author:          Michael Snoyman <michael@snoyman.com>
 maintainer:      Michael Snoyman <michael@snoyman.com>
-synopsis:        Low-level bindings to the zlib package.
-description:     Provides necessary functions for producing a streaming interface. This is used for example by @zlib-conduit@ and @zlib-enum@.
+synopsis:        Low-level bindings to the zlib package. (deprecated)
+description:     Deprecated in favor of streaming-commons
 category:        Codec
 stability:       Experimental
 cabal-version:   >= 1.8
