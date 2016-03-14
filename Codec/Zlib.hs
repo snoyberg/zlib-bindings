@@ -24,6 +24,7 @@ module Codec.Zlib
     , initInflate
     , initInflateWithDictionary
     , feedInflate
+    , feedInflate'
     , finishInflate
     , flushInflate
       -- * Deflate
@@ -38,6 +39,8 @@ module Codec.Zlib
     , defaultWindowBits
     , ZlibException (..)
     , Popper
+    , Popper'
+    , PopResult(..)
     ) where
 
 import Codec.Zlib.Lowlevel
@@ -89,6 +92,9 @@ data ZlibException = ZlibException Int
 instance Exception ZlibException
 
 -- | Some constants for the error codes, used internally
+zStreamEnd :: CInt
+zStreamEnd = 1
+
 zNeedDict :: CInt
 zNeedDict = 2
 
@@ -170,9 +176,23 @@ feedInflate
     :: Inflate
     -> S.ByteString
     -> IO Popper
-feedInflate (Inflate ((fzstr, fbuff), inflateDictionary)) bs = do
+feedInflate inf bs = flattenPopper `fmap` feedInflate' inf bs
+
+flattenPopper :: Popper' -> Popper
+flattenPopper popper = do
+    res <- popper
+    return $ case res of
+                  NothingYet    -> Nothing
+                  StreamEnded _ -> Nothing
+                  Inflated bs   -> Just bs
+
+feedInflate'
+    :: Inflate
+    -> S.ByteString
+    -> IO Popper'
+feedInflate' (Inflate ((fzstr, fbuff), inflateDictionary)) bs = do
     withForeignPtr fzstr $ \zstr ->
-        unsafeUseAsCStringLen bs $ \(cstr, len) ->
+        unsafeUseAsCStringLen bs $ \(cstr, len) -> do
             c_set_avail_in zstr cstr $ fromIntegral len
     return $ drain fbuff fzstr (Just bs) inflate False
   where
@@ -185,6 +205,20 @@ feedInflate (Inflate ((fzstr, fbuff), inflateDictionary)) bs = do
                                     c_call_inflate_noflush zstr))
                        inflateDictionary
             else return res
+
+-- | The result of popping data from an 'Inflate'.
+data PopResult
+    = NothingYet
+    -- ^ no inflated data yet
+    | Inflated !S.ByteString
+    -- ^ a chunk of deflated data
+    | StreamEnded !S.ByteString
+    -- ^ the stream ended with the provided input data left unconsumed
+
+-- | An IO action that returns the next chunk of data, returning a 'PopResult'
+-- allowing access to any leftover data not falling in the archive currently
+-- being inflated.
+type Popper' = IO PopResult
 
 -- | An IO action that returns the next chunk of data, returning 'Nothing' when
 -- there is no more data to be popped.
@@ -200,7 +234,7 @@ drain :: ForeignPtr CChar
       -> Maybe S.ByteString
       -> (ZStream' -> IO CInt)
       -> Bool
-      -> Popper
+      -> Popper'
 drain fbuff fzstr mbs func isFinish = withForeignPtr fzstr $ \zstr -> keepAlive mbs $ do
     res <- func zstr
     when (res < 0 && res /= zBufError)
@@ -213,8 +247,15 @@ drain fbuff fzstr mbs func isFinish = withForeignPtr fzstr $ \zstr -> keepAlive 
             bs <- S.packCStringLen (buff, size)
             c_set_avail_out zstr buff
                 $ fromIntegral defaultChunkSize
-            return $ Just bs
-        else return Nothing
+            return $ Inflated bs
+        else if res == zStreamEnd
+                 then case mbs of
+                          -- We hit the end of the stream and there are leftovers
+                          Just bs -> do n <- fromIntegral `fmap` c_get_avail_in zstr
+                                        return $ StreamEnded $ S.drop (S.length bs - n) bs
+                          -- There couldn't have been any leftovers
+                          Nothing -> return $ StreamEnded S.empty
+                 else return NothingYet
 
 
 -- | As explained in 'feedInflate', inflation buffers your decompressed
@@ -255,14 +296,14 @@ feedDeflate (Deflate (fzstr, fbuff)) bs = do
     withForeignPtr fzstr $ \zstr ->
         unsafeUseAsCStringLen bs $ \(cstr, len) -> do
             c_set_avail_in zstr cstr $ fromIntegral len
-    return $ drain fbuff fzstr (Just bs) c_call_deflate_noflush False
+    return $ flattenPopper $ drain fbuff fzstr (Just bs) c_call_deflate_noflush False
 
 -- | As explained in 'feedDeflate', deflation buffers your compressed
 -- data. After you call 'feedDeflate' with your last chunk of uncompressed
 -- data, use this to flush the rest of the data and signal end of input.
 finishDeflate :: Deflate -> Popper
 finishDeflate (Deflate (fzstr, fbuff)) =
-    drain fbuff fzstr Nothing c_call_deflate_finish True
+    flattenPopper $ drain fbuff fzstr Nothing c_call_deflate_finish True
 
 -- | Flush the deflation buffer. Useful for interactive application.
 -- Internally this passes Z_SYNC_FLUSH to the zlib library.
@@ -273,4 +314,4 @@ finishDeflate (Deflate (fzstr, fbuff)) =
 -- Since 0.0.3
 flushDeflate :: Deflate -> Popper
 flushDeflate (Deflate (fzstr, fbuff)) =
-    drain fbuff fzstr Nothing c_call_deflate_flush True
+    flattenPopper $ drain fbuff fzstr Nothing c_call_deflate_flush True
